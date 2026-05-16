@@ -1,6 +1,7 @@
 package com.earth2me.essentials;
 
 import com.destroystokyo.paper.ClientOption;
+import com.earth2me.essentials.adventure.ComponentHolder;
 import com.earth2me.essentials.commands.Commandfireball;
 import com.earth2me.essentials.craftbukkit.Inventories;
 import com.earth2me.essentials.textreader.IText;
@@ -8,7 +9,6 @@ import com.earth2me.essentials.textreader.KeywordReplacer;
 import com.earth2me.essentials.textreader.TextInput;
 import com.earth2me.essentials.textreader.TextPager;
 import com.earth2me.essentials.userstorage.ModernUserMap;
-import com.earth2me.essentials.utils.AdventureUtil;
 import com.earth2me.essentials.utils.CommonPlaceholders;
 import com.earth2me.essentials.utils.DateUtil;
 import com.earth2me.essentials.utils.FormatUtil;
@@ -30,7 +30,6 @@ import net.ess3.provider.providers.BukkitCommandSendListenerProvider;
 import net.ess3.provider.providers.PaperCommandSendListenerProvider;
 import net.essentialsx.PaperAdventureSmuggler;
 import net.essentialsx.api.v2.events.AsyncUserDataLoadEvent;
-import net.kyori.adventure.text.Component;
 import org.bukkit.BanEntry;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
@@ -212,7 +211,7 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                 }
             }
 
-            ess.getLogger().info(AdventureUtil.miniToLegacy(tlLiteral("mutedUserSpeaks", user.getName(), event.getMessage())));
+            ess.getLogger().info(ess.getAdventureFacet().miniToLegacy(tlLiteral("mutedUserSpeaks", user.getName(), event.getMessage())));
         }
         try {
             final Iterator<Player> it = event.getRecipients().iterator();
@@ -503,18 +502,27 @@ public class EssentialsPlayerListener implements Listener, Runnable {
 
         if (user.isAuthorized("essentials.updatecheck")) {
             ess.runTaskAsynchronously(() -> {
-                for (final Component component : ess.getUpdateChecker().getVersionMessages(false, false, user.getSource())) {
+                for (final ComponentHolder component : ess.getUpdateChecker().getVersionMessages(false, false, user.getSource())) {
                     user.sendComponent(component);
                 }
             });
         }
 
+        final boolean restoreFly = user.isFlyModeEnabled() && user.isAuthorized("essentials.fly");
+        if (restoreFly) {
+            user.getBase().setAllowFlight(true);
+            if (ess.getSettings().isSendFlyEnableOnJoin()) {
+                user.sendTl("flyMode", CommonPlaceholders.enableDisable(user.getSource(), true), user.getDisplayName());
+            }
+        }
+
         if (user.isAuthorized("essentials.fly.safelogin")) {
             user.getBase().setFallDistance(0);
-            if (LocationUtil.shouldFly(ess, user.getLocation())) {
+            final boolean inWater = VersionUtil.getServerBukkitVersion().isHigherThanOrEqualTo(VersionUtil.v1_17_R01) && user.getBase().isInWater();
+            if (!inWater && LocationUtil.shouldFly(ess, user.getLocation())) {
                 user.getBase().setAllowFlight(true);
                 user.getBase().setFlying(true);
-                if (ess.getSettings().isSendFlyEnableOnJoin()) {
+                if (!restoreFly && ess.getSettings().isSendFlyEnableOnJoin()) {
                     user.sendTl("flyMode", CommonPlaceholders.enableDisable(user.getSource(), true), user.getDisplayName());
                 }
             }
@@ -528,6 +536,11 @@ public class EssentialsPlayerListener implements Listener, Runnable {
         if (user.isSocialSpyEnabled() && !user.isAuthorized("essentials.socialspy")) {
             user.setSocialSpyEnabled(false);
             ess.getLogger().log(Level.INFO, "Set socialspy to false for {0} because they had it enabled without permission.", user.getName());
+        }
+
+        if (user.isFlyModeEnabled() && !user.isAuthorized("essentials.fly")) {
+            user.setFlyModeEnabled(false);
+            ess.getLogger().log(Level.INFO, "Set fly mode to false for {0} because they had it enabled without permission.", user.getName());
         }
 
         if (user.isGodModeEnabled() && !user.isAuthorized("essentials.god")) {
@@ -628,9 +641,9 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                     final Date banExpiry = banEntry.getExpiration();
                     if (banExpiry != null) {
                         final String expiry = DateUtil.formatDateDiff(banExpiry.getTime());
-                        event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("tempbanJoin", expiry, banEntry.getReason())));
+                        event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("tempbanJoin", expiry, banEntry.getReason())));
                     } else {
-                        event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("banJoin", banEntry.getReason())));
+                        event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("banJoin", banEntry.getReason())));
                     }
                 } else {
                     banEntry = ess.getServer().getBanList(BanList.Type.IP).getBanEntry(event.getAddress().getHostAddress());
@@ -638,9 +651,9 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                         final Date banExpiry = banEntry.getExpiration();
                         if (banExpiry != null) {
                             final String expiry = DateUtil.formatDateDiff(banExpiry.getTime());
-                            event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("tempbanIpJoin", expiry, banEntry.getReason())));
+                            event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("tempbanIpJoin", expiry, banEntry.getReason())));
                         } else {
-                            event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("banIpJoin", banEntry.getReason())));
+                            event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("banIpJoin", banEntry.getReason())));
                         }
                     }
                 }
@@ -671,8 +684,8 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                 return;
             }
 
-            if (ess.getSettings().isCustomServerFullMessage()) {
-                PaperAdventureSmuggler.smugglePlayerServerFullCheckEvent(event, AdventureUtil.miniToLegacy(tlLiteral("serverFull")));
+            if (!event.isAllowed() && ess.getSettings().isCustomServerFullMessage()) {
+                PaperAdventureSmuggler.smugglePlayerServerFullCheckEvent(event, ess.getAdventureFacet().miniToLegacy(tlLiteral("serverFull")));
             }
         }
 
@@ -684,9 +697,9 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                     final Date banExpiry = banEntry.getExpiration();
                     if (banExpiry != null) {
                         final String expiry = DateUtil.formatDateDiff(banExpiry.getTime());
-                        event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("tempbanJoin", expiry, banEntry.getReason())));
+                        event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("tempbanJoin", expiry, banEntry.getReason())));
                     } else {
-                        event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("banJoin", banEntry.getReason())));
+                        event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("banJoin", banEntry.getReason())));
                     }
                 } else {
                     banEntry = ess.getServer().getBanList(BanListType.IP).getBanEntry(event.getAddress());
@@ -694,9 +707,9 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                         final Date banExpiry = banEntry.getExpiration();
                         if (banExpiry != null) {
                             final String expiry = DateUtil.formatDateDiff(banExpiry.getTime());
-                            event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("tempbanIpJoin", expiry, banEntry.getReason())));
+                            event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("tempbanIpJoin", expiry, banEntry.getReason())));
                         } else {
-                            event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("banIpJoin", banEntry.getReason())));
+                            event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("banIpJoin", banEntry.getReason())));
                         }
                     }
                 }
@@ -706,7 +719,7 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                     return;
                 }
                 if (ess.getSettings().isCustomWhitelistMessage()) {
-                    event.setKickMessage(AdventureUtil.miniToLegacy(tlLiteral("whitelistKick")));
+                    event.setKickMessage(ess.getAdventureFacet().miniToLegacy(tlLiteral("whitelistKick")));
                 }
             }
         }
@@ -797,10 +810,12 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                     final String playerName = ess.getSettings().isSocialSpyDisplayNames() ? player.getDisplayName() : player.getName();
                     for (final User spyer : ess.getOnlineUsers()) {
                         if (spyer.isSocialSpyEnabled() && !player.equals(spyer.getBase())) {
-                            final Component base = (user.isMuted() && ess.getSettings().getSocialSpyListenMutedPlayers())
+                            final ComponentHolder base = (user.isMuted() && ess.getSettings().getSocialSpyListenMutedPlayers())
                                     ? spyer.tlComponent("socialSpyMutedPrefix")
                                     : spyer.tlComponent("socialSpyPrefix");
-                            spyer.sendComponent(base.append(AdventureUtil.legacyToAdventure(playerName)).append(Component.text(": " + event.getMessage())));
+                            final ComponentHolder formatted = ess.getAdventureFacet().deserializeMiniMessage(spyer.playerTl("socialSpyCmdFormat", playerName, event.getMessage()));
+
+                            spyer.sendComponent(ess.getAdventureFacet().append(base, formatted));
                         }
                     }
                 }
@@ -824,7 +839,7 @@ public class EssentialsPlayerListener implements Listener, Runnable {
                     user.sendTl("voiceSilencedTime", dateDiff);
                 }
             }
-            ess.getLogger().info(AdventureUtil.miniToLegacy(tlLiteral("mutedUserSpeaks", player.getName(), event.getMessage())));
+            ess.getLogger().info(ess.getAdventureFacet().miniToLegacy(tlLiteral("mutedUserSpeaks", player.getName(), event.getMessage())));
             return;
         }
 
@@ -1177,6 +1192,10 @@ public class EssentialsPlayerListener implements Listener, Runnable {
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onPlayerFishEvent(final PlayerFishEvent event) {
+        if (!ess.getSettings().cancelAfkOnFish()) {
+            return;
+        }
+
         final User user = ess.getUser(event.getPlayer());
         user.updateActivityOnInteract(true);
     }
@@ -1216,10 +1235,12 @@ public class EssentialsPlayerListener implements Listener, Runnable {
         public void onPlayerPickupItem(final org.bukkit.event.player.PlayerPickupItemEvent event) {
             if (event.getItem().hasMetadata(Commandfireball.FIREBALL_META_KEY)) {
                 event.setCancelled(true);
-            } else if (ess.getSettings().getDisableItemPickupWhileAfk()) {
-                if (ess.getUser(event.getPlayer()).isAfk()) {
-                    event.setCancelled(true);
-                }
+                return;
+            }
+            final User user = ess.getUser(event.getPlayer());
+            if ((ess.getSettings().getDisableItemPickupWhileAfk() && user.isAfk())
+                || (user.isVanished() && !user.isAuthorizedCached("essentials.vanish.pickup"))) {
+                event.setCancelled(true);
             }
         }
     }
@@ -1227,8 +1248,10 @@ public class EssentialsPlayerListener implements Listener, Runnable {
     private final class PickupListener1_12 implements Listener {
         @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
         public void onPlayerPickupItem(final org.bukkit.event.entity.EntityPickupItemEvent event) {
-            if (ess.getSettings().getDisableItemPickupWhileAfk() && event.getEntity() instanceof Player) {
-                if (ess.getUser((Player) event.getEntity()).isAfk()) {
+            if (event.getEntity() instanceof Player) {
+                final User user = ess.getUser((Player) event.getEntity());
+                if ((ess.getSettings().getDisableItemPickupWhileAfk() && user.isAfk())
+                    || (user.isVanished() && !user.isAuthorizedCached("essentials.vanish.pickup"))) {
                     event.setCancelled(true);
                 }
             }
@@ -1247,6 +1270,10 @@ public class EssentialsPlayerListener implements Listener, Runnable {
     private final class CommandSendFilter implements CommandSendListenerProvider.Filter {
         @Override
         public Predicate<String> apply(Player player) {
+            // There is no event for op status changes, but the command list is resent when
+            // a player is opped/deopped, so we invalidate cached permissions here.
+            ess.getPermissionsHandler().invalidatePermissionCache(player.getUniqueId());
+
             final User user = ess.getUser(player);
             final Set<PluginCommand> checked = new HashSet<>();
             final Set<PluginCommand> toRemove = new HashSet<>();
